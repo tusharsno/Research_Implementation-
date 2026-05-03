@@ -72,26 +72,43 @@ def main():
     )
     plot_feature_importance(ranking, save_path=f"{args.output_dir}/feature_importance.png")
 
-    # ── Step 3: Train/Test Split ──────────────────────────────────────────────
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_sel, y, test_size=0.2, random_state=42, stratify=y
+    # ── Step 3: Train/Validation/Test Split (70/15/15) ───────────────────────
+    # First split: 70% train, 30% temp
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X_sel, y, test_size=0.30, random_state=42, stratify=y
     )
-    print(f"\n[Split] Train: {X_train.shape} | Test: {X_test.shape}")
+    # Second split: 50% of temp = 15% val, 50% of temp = 15% test
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
+    )
+    print(f"\n[Split] Train: {X_train.shape} | Val: {X_val.shape} | Test: {X_test.shape}")
+    print(f"[Split] Ratio  → Train: {len(y_train)/len(y)*100:.1f}% | "
+          f"Val: {len(y_val)/len(y)*100:.1f}% | "
+          f"Test: {len(y_test)/len(y)*100:.1f}%")
 
-    # ── Step 4: Cross-Validation Benchmarking ─────────────────────────────────
-    print(f"\n── Step 4: {args.cv_folds}-Fold Cross-Validation Benchmarking ──")
+    # ── Step 4: Cross-Validation Benchmarking (on train set) ─────────────────
+    print(f"\n── Step 4: {args.cv_folds}-Fold Cross-Validation Benchmarking (Train Set) ──")
     summary_df = cross_validate_all(X_train, y_train, n_splits=args.cv_folds)
 
-    print("\n\n[Results] Model Benchmark Summary:")
-    # Print in professor's table format
-    display_cols = ["Model", "Accuracy", "Macro_F1", "AUC_Macro", "G_Mean"]
+    print("\n\n[Results] Model Benchmark Summary (Professor's Table Format):")
+    display_cols = ["Model", "Type", "Accuracy", "Macro_F1", "AUC_Macro", "G_Mean", "MAE"]
     print(summary_df[display_cols].to_string(index=False))
+    print("\n[Note] Ordinal models respect N < P < Y ordering (MAE penalizes ordinal errors)")
     summary_df.to_csv(f"{args.output_dir}/benchmark_summary.csv", index=False)
     plot_benchmark_results(summary_df,
                            save_path=f"{args.output_dir}/benchmark_results.png")
 
-    # ── Step 5: Final Evaluation ──────────────────────────────────────────────
-    print(f"\n── Step 5: Final Evaluation — {args.best_model} ──")
+    # ── Step 5: Validation Set Evaluation ───────────────────────────────────
+    print(f"\n── Step 5: Validation Set Evaluation ──")
+    print("[Validation] Evaluating best model on validation set (15%)...")
+    _, val_metrics = final_evaluation(
+        X_train, y_train, X_val, y_val, model_name=args.best_model
+    )
+    print(f"[Validation] Accuracy: {val_metrics['accuracy']:.4f} | "
+          f"F1: {val_metrics['f1_macro']:.4f} | AUC: {val_metrics['auc_macro']:.4f}")
+
+    # ── Step 6: Final Test Set Evaluation ─────────────────────────────────
+    print(f"\n── Step 6: Final Test Set Evaluation — {args.best_model} ──")
     best_model, metrics = final_evaluation(
         X_train, y_train, X_test, y_test, model_name=args.best_model
     )
@@ -100,9 +117,9 @@ def main():
         save_path=f"{args.output_dir}/confusion_matrix_{args.best_model}.png"
     )
 
-    # ── Step 6: XAI Analysis ──────────────────────────────────────────────────
+    # ── Step 7: XAI Analysis ──────────────────────────────────────────────────
     if not args.skip_xai:
-        print(f"\n── Step 6: XAI Analysis (SHAP + LIME) ──")
+        print(f"\n── Step 7: XAI Analysis (SHAP + LIME) ──")
         run_xai_analysis(
             best_model, X_train, X_test, y_test,
             feature_names=selected_features,
@@ -113,11 +130,14 @@ def main():
     # ── Summary ───────────────────────────────────────────────────────────────
     print(f"\n{'='*65}")
     print(f"  PIPELINE COMPLETE")
-    print(f"  Best Model : {args.best_model}")
-    print(f"  F1 Weighted: {metrics['f1_weighted']:.4f}")
-    print(f"  AUC Macro  : {metrics['auc_macro']:.4f}")
-    print(f"  MAE (Ord.) : {metrics['mae']:.4f}")
-    print(f"  Outputs    : {os.path.abspath(args.output_dir)}/")
+    print(f"  Split          : 70% Train | 15% Validation | 15% Test")
+    print(f"  Best Model     : {args.best_model}")
+    print(f"  Val  Accuracy  : {val_metrics['accuracy']:.4f}")
+    print(f"  Test Accuracy  : {metrics['accuracy']:.4f}")
+    print(f"  Test F1 Macro  : {metrics['f1_macro']:.4f}")
+    print(f"  Test AUC Macro : {metrics['auc_macro']:.4f}")
+    print(f"  Test MAE (Ord.): {metrics['mae']:.4f}")
+    print(f"  Outputs        : {os.path.abspath(args.output_dir)}/")
     print(f"{'='*65}\n")
 
 

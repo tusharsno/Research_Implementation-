@@ -18,8 +18,11 @@ LABEL_MAP_INV = {0: "Normal", 1: "Pre-Diabetic", 2: "Diabetic"}
 # Clinical features where zero is physiologically impossible
 ZERO_INVALID_COLS = ["Cholesterol", "Creatinine", "BMI", "FBS", "HbA1c"]
 
-# Columns to drop (redundant or non-predictive)
-ADMIN_COLS = ["PatientID", "Name", "Date", "ID", "Risk"]
+# Columns to drop (redundant, non-predictive, or data leakage)
+# Diabetes_Duration, Nephropathy, Retinopathy, IHD, Medication are OUTCOMES
+# of diabetes, not predictors — including them causes data leakage
+ADMIN_COLS = ["PatientID", "Name", "Date", "ID", "Risk",
+              "Diabetes_Duration", "Nephropathy", "Retinopathy", "IHD", "Medication"]
 
 # Categorical columns to one-hot encode
 CATEGORICAL_COLS = ["Gender", "Ethnicity", "Medication"]
@@ -121,9 +124,12 @@ class OrdinalSMOTE:
     def fit_resample(self, X: np.ndarray, y: np.ndarray):
         print(f"[OrdinalSMOTE] Before: {dict(Counter(y))}")
 
+        counts = Counter(y)
+        target_count = counts.most_common(1)[0][1]  # match majority class
+
         X_res, y_res = X.copy(), y.copy()
 
-        # Step 1: Balance N(0) ↔ P(1)
+        # Step 1: Balance N(0) ↔ P(1) — upsample Normal to match Pre-Diabetic
         mask_np = np.isin(y_res, [0, 1])
         X_np, y_np = X_res[mask_np], y_res[mask_np]
         if len(np.unique(y_np)) == 2:
@@ -131,12 +137,13 @@ class OrdinalSMOTE:
             if k >= 1:
                 smote = SMOTE(random_state=self.random_state, k_neighbors=k)
                 X_np_res, y_np_res = smote.fit_resample(X_np, y_np)
-                orig_p_count = (y_np == 1).sum()
-                new_p_X = X_np_res[y_np_res == 1][orig_p_count:]
-                new_p_y = y_np_res[y_np_res == 1][orig_p_count:]
-                if len(new_p_X) > 0:
-                    X_res = np.vstack([X_res, new_p_X])
-                    y_res = np.concatenate([y_res, new_p_y])
+                # Add all newly generated Normal samples
+                orig_n_count = (y_np == 0).sum()
+                new_n_X = X_np_res[y_np_res == 0][orig_n_count:]
+                new_n_y = y_np_res[y_np_res == 0][orig_n_count:]
+                if len(new_n_X) > 0:
+                    X_res = np.vstack([X_res, new_n_X])
+                    y_res = np.concatenate([y_res, new_n_y])
 
         # Step 2: Balance P(1) ↔ Y(2)
         mask_py = np.isin(y_res, [1, 2])
@@ -152,6 +159,25 @@ class OrdinalSMOTE:
                 if len(new_p_X) > 0:
                     X_res = np.vstack([X_res, new_p_X])
                     y_res = np.concatenate([y_res, new_p_y])
+
+        # Step 3: Balance N(0) up to match majority if still underrepresented
+        counts_after = Counter(y_res)
+        majority = max(counts_after.values())
+        n_count = counts_after.get(0, 0)
+        if n_count < majority // 2:
+            mask_np2 = np.isin(y_res, [0, 1])
+            X_np2, y_np2 = X_res[mask_np2], y_res[mask_np2]
+            if len(np.unique(y_np2)) == 2:
+                k2 = min(self.k_neighbors, Counter(y_np2).most_common()[-1][1] - 1)
+                if k2 >= 1:
+                    smote2 = SMOTE(random_state=self.random_state + 1, k_neighbors=k2)
+                    X_np2_res, y_np2_res = smote2.fit_resample(X_np2, y_np2)
+                    orig_n2 = (y_np2 == 0).sum()
+                    new_n2_X = X_np2_res[y_np2_res == 0][orig_n2:]
+                    new_n2_y = y_np2_res[y_np2_res == 0][orig_n2:]
+                    if len(new_n2_X) > 0:
+                        X_res = np.vstack([X_res, new_n2_X])
+                        y_res = np.concatenate([y_res, new_n2_y])
 
         print(f"[OrdinalSMOTE] After:  {dict(Counter(y_res))}")
         return X_res, y_res
