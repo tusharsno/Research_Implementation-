@@ -31,11 +31,11 @@ def parse_args():
                         help="Path to dataset CSV")
     parser.add_argument("--target",  type=str, default="Risk_Level",
                         help="Target column name")
-    parser.add_argument("--top_k",   type=int, default=10,
+    parser.add_argument("--top_k",   type=int, default=14,
                         help="Number of top features to select")
     parser.add_argument("--cv_folds",type=int, default=5,
                         help="Cross-validation folds")
-    parser.add_argument("--best_model", type=str, default="Ordinal_XGBoost",
+    parser.add_argument("--best_model", type=str, default="Ordinal_RandomForest",
                         help="Model for final eval and XAI")
     parser.add_argument("--output_dir", type=str, default="outputs",
                         help="Directory to save plots and results")
